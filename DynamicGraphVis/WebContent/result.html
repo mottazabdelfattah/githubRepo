@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Multi-scale Dynamic Graph Vis.</title>
+<script src="JS/jquery-3.1.1.min.js"></script>
+<script src="JS/common.js"></script>
+<script src="JS/canvas.listener.js"></script>
+<script src="JS/ajax.requests.js"></script>
+<script src="JS/main.js"></script>
+<link rel="stylesheet" type="text/css" href="style.css">
+</head>
+<body>
+<input type="button" id="selectionBtn1" value="selection1" onclick="createSelectionRect(1);" />
+<input type="button" id="selectionBtn2" value="selection2" onclick="createSelectionRect(2);" />
+<input type="button" id="selectionBtn3" value="selection3" onclick="createSelectionRect(3);" />
+selection type: 
+<select id="selectionType">
+	<option value="1" selected="selected">time</option>
+	<option value="2">space and time</option>
+</select>
+
+<div id="cursors"></div>
+
+<div style="margin-left: 50px; padding-top:2px;">
+<canvas id="timeAxis" width="1500" height="10"></canvas>
+<div style="display: inline-block">
+	<div class="outEdgeLabel"></div><span style="font-size: small;">out-edges</span><br>
+	<div class="inEdgeLabel"></div><span style="font-size: small;">in-edges</span>
+</div>
+</div>
+
+	
+
+<div id="colorLegend" >
+	<span style="display:block">max</span>
+	<img alt="" src="images/color_legend2.PNG">
+	<span style="display:block">min</span>
+</div>
+
+<div id="graphs"></div>
+<div id="selections"></div>
+
+<script type="text/javascript">
+var stripWidth = 10;
+var pixelVerticalGap = 0;
+var segWidth = 400;
+var currentSelection = 0;
+var rootCanvasWidth = 1500;
+var selectionColors = ['#bf66e4','#66e1e3','#7ab97a']
+var rootChar = '_';
+var timeLevels = 3;
+var defaultCanvasHeight = 200;
+var rootTimeLevel = 2;
+var maxEdgeWeight = [];
+var arrowPointerWidth = 8;
+
+
+var maxVertexBarLength = 20;
+var vertexMenuWidth = maxVertexBarLength*2+ 30;	// for out- & in-edges
+var marginSpace = 25 + arrowPointerWidth + vertexMenuWidth;
+
+var rootGraphId = '';
+var graphDict = {};
+var timeLevelsDict = {};
+var vertexList = [];
+var clusterHierarchy;
+var maxOutEdgeCount = 0;
+var maxInEdgeCount = 0;
+var dendrogramCanvasWidth = 0;
+
+var intraAction = 2;
+var interAction = 1;
+
+
+$(document).ready(function() {	
+	
+	$.ajax({
+		type: 'post',
+		url: 'getImageSegment',
+		data: {actionName:'getInitialSettings'},
+		success: function (output) {
+			// initial settings
+			defaultCanvasHeight = output["imgHeight"];
+			maxEdgeWeight = output["maxEdgeWeight"];
+			vertexList = output["vertexList"];
+			pixelVerticalGap = output["pixelVerticalGap"];
+			clusterHierarchy = jQuery.parseJSON(output["clusterJASONHierarchy"]);
+			dendrogramCanvasWidth = output["dendrogramCanvasWidth"];
+			
+			// set time axis
+			var timeCanvas = document.getElementById('timeAxis');
+			drawTimeAxis(timeCanvas, timeCanvas.width, 5);
+			
+			// initialize the first level
+			var segmentsList = getGraphSegments(0, segWidth, 0, defaultCanvasHeight, rootCanvasWidth);
+			var htmlCoordinates = [];
+			htmlCoordinates[0]  = Math.round(timeCanvas.getBoundingClientRect().left);	// X_topleft
+			htmlCoordinates[1]  = 80;	// Y_topleft
+			var rootGraphObj = new GraphObj(0, rootChar, rootTimeLevel);
+			rootGraphObj.segmentsList = segmentsList;
+			rootGraphObj.htmlCoordinates = htmlCoordinates;
+			rootGraphObj.width = rootCanvasWidth;
+			maxInEdgeCount = output["maxInEdgeCount"];
+			maxOutEdgeCount = output["maxOutEdgeCount"];
+			for(var i=0; i<vertexList.length; i++){
+				var vertex = translatePipeSeparatedStringToVertObj(vertexList[i]);
+				rootGraphObj.vertexList.push(vertex);	
+			}
+			
+			
+			rootGraphId = rootGraphObj.id;
+			graphDict[rootGraphId] = rootGraphObj;
+			updateTimeLevelDictionary(rootGraphObj.timeLevel, rootGraphObj);
+			
+			
+			refreshTheScene(rootGraphObj);
+			
+			
+		}
+	});		
+	
+	
+	
+});
+
+/*
+var clusterHierarchy = {
+		  "name": "c0", 
+		  "ycoordinate":"30",
+		  "children": [ 
+		    {
+		      "name": "c1",
+		      "ycoordinate":"15",
+		      "children": [
+		         {
+		           "name": "c3",
+		           "ycoordinate":"5",
+		           "children": [
+		        	   { 	
+		        		   "name":"c6",
+		        		   "ycoordinate":"0"
+	        		   },
+	        		   {
+	        			   "name":"c7",
+		        		   "ycoordinate":"10"
+	        		   }
+		        	   
+	        	   ]
+		         },
+		         {
+		           "name": "c4",
+		           "ycoordinate":"25",
+		           "children": [
+		        	   { 	
+		        		   "name":"c8",
+		        		   "ycoordinate":"20"
+	        		   },
+	        		   {
+	        			   "name":"c9",
+		        		   "ycoordinate":"30"
+	        		   }
+		        	   
+	        	   ]
+		         }
+		      ]
+		    },
+		    {
+		      "name": "c2",
+	    	  "ycoordinate":"45",
+	    	  "children": [
+	        	   { 	
+	        		   "name":"c10",
+	        		   "ycoordinate":"40"
+	       		   },
+	       		   {
+	       			   "name":"c11",
+		        		   "ycoordinate":"50"
+	       		   }
+		        	   
+	       	   ]
+		    } 
+		  ] 
+		};
+
+	//called with every property and its value
+	function process(key,value) {
+	    console.log(key + " : "+value);
+	}
+
+	var queue = [o];
+	function traverse(queue) {
+	    while (queue.length>0) {
+	        var obj = queue.shift(); 
+	        var name = $(obj).attr('name');
+	        var ycoordinate = $(obj).attr('ycoordinate');
+	        var children = $(obj).attr('children');
+
+	        console.log(name);
+	        console.log(ycoordinate);
+	        //console.log(children);
+	        
+	        if (typeof children !== typeof undefined && children !== false) {
+	        	data = $.parseJSON(JSON.stringify(children));
+	        	$.each(data, function(i, item) {
+	        		queue.push(item);
+	        	});
+	        }
+	    }
+	}
+
+	*/
+	//that's all... no magic, no bloated framework
+	//traverse(queue);
+
+
+
+function createSelectionRect(selection){
+	currentSelection = selection;
+}
+</script>
+</body>
+</html>

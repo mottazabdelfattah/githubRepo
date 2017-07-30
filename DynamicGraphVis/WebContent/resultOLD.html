@@ -1,0 +1,879 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Insert title here</title>
+<script src="JS/jquery-3.1.1.min.js"></script>
+<link rel="stylesheet" type="text/css" href="style.css">
+</head>
+<body>
+<input type="button" id="selectionBtn1" value="selection1" onclick="createSelectionRect(1);" />
+<input type="button" id="selectionBtn2" value="selection2" onclick="createSelectionRect(2);" />
+<input type="button" id="selectionBtn3" value="selection3" onclick="createSelectionRect(3);" />
+
+<div id="cursors"></div>
+
+<div style="text-align:center; padding-top:10px;">
+<canvas id="timeAxis" width="1500" height="10"></canvas>
+</div>
+<div id="colorLegend" >
+	<span style="display:block">max</span>
+	<img alt="" src="images/color_legend2.PNG">
+	<span style="display:block">min</span>
+</div>
+
+<!-- time level 2 -->
+<div id="slider2" class="slider"></div>
+<div id="container2">
+<div id="container2_cavases"></div>
+<div id="container2_compare"></div>
+</div>
+<!-- time level 1 -->
+
+<canvas id="guidelines1" width="1500" height="50"></canvas>
+<div id="slider1" class="slider"></div>
+<div id="container1">
+<div id="container1_cavases"></div>
+<div id="container1_compare"></div>
+</div>
+<div id="selector1"></div>
+
+<!-- time level 0 -->
+<canvas id="guidelines0" width="1500" height="50"></canvas>
+<div id="slider0" class="slider"></div>
+<div id="container0">
+<div id="container0_cavases"></div>
+<div id="container0_compare"></div>
+</div>
+<div id="selector0"></div>
+
+
+
+<script type="text/javascript">
+
+
+stripWidth = 10;
+segWidth = 400;
+var images = [];
+var currentSelection = 0;
+var rootCanvasWidth = 1500;
+var selectionColors = ['#bf66e4','#66e1e3','#7ab97a']
+var rootChar = '_';
+var timeLevels = 3;
+var defaultCanvasHeight = 200;
+
+rootTimeLevel = 2;
+var minEdgeWeight = [1,1,1];
+
+$(document).ready(function() {	
+	
+	var canvasWidth = rootCanvasWidth;
+	var noSegments = Math.ceil(canvasWidth/segWidth);
+
+	for (i=0;i<noSegments;i++){
+		images[i] = new Image();
+	}
+	
+	loadCanvasSegments(0,segWidth,rootTimeLevel,null,null,minEdgeWeight[rootTimeLevel],noSegments);
+	
+	//set time axis
+	var timeCanvas = document.getElementById('timeAxis');
+	setTimeScale(timeCanvas, timeCanvas.width, 5);
+	setEdgeWeightSlider(0,segWidth,rootTimeLevel,null,null,noSegments);
+	
+});
+
+function loadCanvasSegments(startX, segWidth,timeLevel,parentCanavs,startXHeirarchy,minEdgeWeight, noSegments, selectionid){
+	for (i = 1; i <= (noSegments); i++) {
+		getImageSegment(startX,segWidth,timeLevel,parentCanavs,startXHeirarchy,minEdgeWeight,selectionid);
+		startX +=  segWidth;
+	}
+}
+
+function getImageSegment(startX, segWidth, timeLevel, parentCanavs,startXHeirarchy,minEdgeWeight,selectionid){
+	$.ajax({
+		type: 'post',
+		url: 'getImageSegment',
+		data: {actionName:'getImageSegment', startX:startX,segWidth:segWidth, timeLevel:timeLevel, startXHeirarchy:startXHeirarchy,minEdgeWeight:minEdgeWeight},
+		success: function (output) {
+			var imgHeight = output["imgHeight"];
+			var imgData = output["imgData"];
+			if(imgData!=""){
+				setCanvasSegments(imgData,startX,imgHeight, timeLevel, parentCanavs,selectionid);
+			}
+		}
+	});
+	
+}
+
+function getSelectionDate(label, startX, timeLevel, startXHeirarchy, isAppend){
+	//console.log("startX: "+ startX);
+	//console.log("startXHeirarchy: "+ startXHeirarchy);
+	$.ajax({
+		type: 'post',
+		url: 'getImageSegment',
+		data: {actionName:'getSelectionDate',startX:startX,timeLevel:timeLevel, startXHeirarchy:startXHeirarchy},
+		success: function (output) {
+			//console.log("ajax: "+ output["dateTimeString"]);
+			if(isAppend===1){
+				document.getElementById(label).innerHTML += ' - '+output["dateTimeString"];
+			}else{
+				document.getElementById(label).innerHTML = output["dateTimeString"];	
+			}
+			
+		}
+	});
+	
+}
+
+function setCanvasSegments(base64,startX,imgHeight, timeLevel, parentCanavs,selectionid){
+	img = null;
+	canvas = getCanvasElement(timeLevel,parentCanavs,selectionid);//document.getElementById('canvas0_t'+timeLevel);
+	var ctx = canvas.getContext('2d');
+	//canvas_scale = document.getElementById('canvas_t'+timeLevel+'_scale');
+	if(timeLevel==rootTimeLevel){
+		noSegments = canvas.width/segWidth;
+		var startXNormalized = (startX*1.0)/canvas.width;
+		var a=Math.abs(startXNormalized * (noSegments-1));
+		var img_index = Math.floor(a);
+		img = images[img_index];
+	}else{
+		startX = 0;// fill the whole canvas with th image
+		img = new Image();
+		displayGuideLines(timeLevel);
+	}
+	
+	img.onload = function() {
+		if(timeLevel<rootTimeLevel){
+			ctx.clearRect(0, 0, canvas.width, canvas.height);	
+		}
+        ctx.drawImage(this, startX, 0);
+    };
+    img.src = "data:image/png;base64," + base64;
+    
+    if(canvas.height!=imgHeight){	// first returned valid segment will set the height of canvas
+		canvas.height=imgHeight;
+		initDraw(canvas, (timeLevel-1),parentCanavs);
+		//canvas_scale.height = imgHeight;
+		//setCanvasScale(canvas_scale,imgHeight,1);
+	}
+}
+
+function setCanvasScale(canvas_scale, imgHeight, pixelVertexGap){
+	s=0;
+	var ctx_scale = canvas_scale.getContext('2d');
+	var canvasScaleWidth = canvas_scale.width
+	for (i = 0; i < imgHeight; i+=pixelVertexGap) {	// loop over returned pixels from ajax request
+		for(j=0;j<canvasScaleWidth;j++){
+			var id = ctx_scale.getImageData(j,i,1,1); // only do this once per page
+			var d  = id.data;                        // only do this once per page
+			if(s%10==0)
+				d[0]   = 255;
+			else
+				d[0]   = 0;
+			d[1]   = 0;
+			d[2]   = 0;
+			d[3]   = 255;
+			ctx_scale.putImageData(id, j, i );
+			
+		}
+		s++;
+		
+	}
+}
+
+function setTimeScale(canvas_scale, imgWidth, pixelTimeGap){
+	s=0;
+	var ctx_scale = canvas_scale.getContext('2d');
+	var canvasScaleHeight = canvas_scale.height
+	var id; var d;
+	for (i = 0; i < imgWidth; i++) {	// loop over returned pixels from ajax request
+		id = ctx_scale.getImageData(i,0,1,1); // only do this once per page
+		d  = id.data;                        // only do this once per page
+		
+		d[0]   = 0;
+		d[1]   = 0;
+		d[2]   = 0;
+		d[3]   = 255;
+		ctx_scale.putImageData(id, i, 0 );
+		if(i%pixelTimeGap == 0){
+			for(j=1;j<canvasScaleHeight;j++){
+				id = ctx_scale.getImageData(i,j,1,1); // only do this once per page
+				d  = id.data;                        // only do this once per page
+				
+				d[0]   = 0;
+				d[1]   = 0;
+				d[2]   = 0;
+				d[3]   = 255;
+				ctx_scale.putImageData(id, i, j );
+				
+			}
+		}
+		s++;
+		
+	}
+}
+
+function setEdgeWeightSlider(startX,segWidth, timeLevel, parentCanavs,startXHeirarchy,noSegments){
+	
+	
+	var span1 = document.createElement('span');
+	var span2 = document.createElement('span');
+	var inputRange = document.createElement('input');
+	
+	span1.style.display='block';
+	span1.innerHTML = 'Edge weight';
+	
+	span2.style.display='block';
+	span2.id = 'range_'+timeLevel+'_value';
+	span2.innerHTML = '1';
+	
+	inputRange.id = 'range_'+timeLevel;
+	inputRange.type = 'range';
+	inputRange.setAttribute("orient",'vertical');
+	inputRange.value = '1';
+	inputRange.min = '1';
+	inputRange.max = '50';
+	inputRange.addEventListener('change', function()
+		{
+			document.getElementById('range_'+timeLevel+'_value').innerHTML = this.value;
+			minEdgeWeight[timeLevel] = this.value;
+			var canvasesContainer = document.getElementById('container'+timeLevel+'_cavases').children;
+			if(canvasesContainer !== 'undefined'){
+				var selectionid = 0;
+				for(var i=0;i<canvasesContainer.length;i++){
+					var canvasDiv = canvasesContainer[i];
+					if(canvasDiv.tagName == 'DIV'){
+						selectionid = canvasDiv.getAttribute('selectionid');
+						loadCanvasSegments(startX,segWidth,timeLevel,parentCanavs,startXHeirarchy,this.value,noSegments,selectionid);	
+					}
+					
+				}
+			}
+			
+		}, 
+		false
+	);
+	//currentSelection = 0;	// reset currentSelection
+	var divSlider = document.getElementById('slider'+timeLevel); 
+	divSlider.appendChild(span1);
+	divSlider.appendChild(inputRange);
+	divSlider.appendChild(span2);
+	
+	// TODO: set exact position of div element
+	
+}
+
+function initDraw(canvas, timeLevel,parentCanvas) {
+    function setMousePosition(e) {
+        var ev = e || window.event; //Moz || IE
+        /*
+        if (ev.pageX) { //Moz
+            mouse.x = ev.pageX + window.pageXOffset;
+            mouse.y = ev.pageY + window.pageYOffset;
+        } else if (ev.clientX) { //IE
+            mouse.x = ev.clientX + document.body.scrollLeft;
+            mouse.y = ev.clientY + document.body.scrollTop;
+        }*/
+        mouse.x = e.pageX + $(document).scrollLeft();// - canvas.getBoundingClientRect().left;
+        mouse.y = e.pageY ;//+ $(document).scrollTop();// - canvas.getBoundingClientRect().top;
+    };
+
+    var mouse = {
+        x: 0,
+        y: 0,
+        startX: 0,
+        startY: 0
+    };
+    var element = null;
+
+    canvas.onmousemove = function (e) {
+        setMousePosition(e);
+        onmousemovement(canvas, timeLevel,element, mouse);
+    }
+	
+    canvas.onclick = function (e) {
+        if (element !== null) {
+        	
+        	//console.log("canvas: "+canvas.id);
+            canvas.style.cursor = "default";
+            var rect = canvas.getBoundingClientRect();
+            sWidth =  Math.round(Math.abs((mouse.x - rect.left) - (mouse.startX - rect.left)))
+            sStart =  Math.round(Math.min(mouse.startX,mouse.x) - rect.left)
+            
+            var startlabel = document.getElementById('startlabel_'+element.id);
+            
+            leftpadding = 0;
+            labelWidth = sWidth;
+            if(sWidth<200){
+            	labelWidth = 200;
+            	remainig = 200-sWidth;
+            	leftpadding = remainig/2;
+            }
+            startlabel.style.width = labelWidth+'px';
+            startlabel.style.marginLeft = '0px';
+            startlabel.style.left = -leftpadding+'px';
+       		
+            relativeStart = Math.round(mouse.x - canvas.getBoundingClientRect().left)
+       		getSelectionDate(startlabel.id, relativeStart,timeLevel+1, getSelectionHierarchy(canvas),1);
+       		
+            
+       		
+            startXHeirarchy = [0,0,0];
+            startXHeirarchy[timeLevel+1] = sStart;
+            
+            if(parentCanvas!==null){
+            	canvasId = canvas.id;
+                selectorId = canvasId.replace('canvas','selectRect_');
+                var selectorObj = document.getElementById(selectorId);	
+                parentSStart =  Math.round(selectorObj.getBoundingClientRect().left - parentCanvas.getBoundingClientRect().left);
+                startXHeirarchy[timeLevel+2] = parentSStart;
+            }
+            
+            getImageSegment(sStart, sWidth, timeLevel,canvas,startXHeirarchy,minEdgeWeight[timeLevel],currentSelection);
+            if(document.getElementById('range_'+timeLevel)==null){
+            	setEdgeWeightSlider(sStart, sWidth, timeLevel, canvas, startXHeirarchy, 1);	
+            }
+            
+
+          	element = null;
+            
+            //console.log("finsihed.");
+        } else {
+            //console.log("begun.");
+            if(currentSelection !== 0){
+            	
+            	cursorDiv = document.getElementById('cursor')
+	            selectRect = document.getElementById('selectRect_'+timeLevel+"_"+currentSelection+'_'+canvas.id)
+	            if(selectRect!==null){
+	            	selectRect.remove();
+	            }
+	            
+	            mouse.startX = mouse.x;
+	            mouse.startY = mouse.y;
+	            element = document.createElement('div');
+	            
+	            element.id = 'selectRect_'+timeLevel+'_'+currentSelection+'_'+canvas.id;
+	            element.className = 'selection'+currentSelection
+	            element.style.left = mouse.x + 'px';
+	            element.style.top = canvas.getBoundingClientRect().top + window.scrollY + 'px';
+	            element.style.height = canvas.height+"px";
+	            
+	            // add date lable
+	            var startlabel = document.createElement("span");
+	            startlabel.id = 'startlabel_'+element.id;
+	            startlabel.className = 'tooltiptexttop';
+        		relativeStart = Math.round(mouse.x - canvas.getBoundingClientRect().left)
+        		getSelectionDate(startlabel.id, relativeStart,timeLevel+1,getSelectionHierarchy(canvas));
+        		
+        		element.appendChild(startlabel);
+	            document.getElementById('selector'+timeLevel).appendChild(element)
+	            canvas.style.cursor = "crosshair";
+	            element.onmousemove = function (e) {
+	                setMousePosition(e);
+	                onmousemovement(canvas, timeLevel,element, mouse);
+	            }
+            }
+            
+        }
+    }
+	
+}
+
+function onmousemovement(canvas, timeLevel,element, mouse){
+	cursorDiv = document.getElementById('cursor')
+    if(cursorDiv!==null){
+    	cursorDiv.style.left = mouse.x + 'px';
+    	cursorDiv.style.top = canvas.getBoundingClientRect().top + window.scrollY + 'px';
+    	var canvasBoundaries = canvas.getBoundingClientRect();
+    	relativeStart = Math.round(mouse.x - canvasBoundaries.left)
+    	//console.log(relativeStart);
+    	//console.log(selectRect.children[0].id);
+    	getSelectionDate(cursorDiv.children[0].id, relativeStart,timeLevel+1, getSelectionHierarchy(canvas));
+    }else{
+    	cursorDiv = document.createElement('div');
+        
+    	cursorDiv.id = 'cursor'
+    	cursorDiv.className = 'selection1';
+    	cursorDiv.style.left = mouse.x + 'px';
+    	cursorDiv.style.top = canvas.getBoundingClientRect().top + window.scrollY + 'px';
+    	cursorDiv.style.width = stripWidth+"px";
+    	cursorDiv.style.height = canvas.height+"px";
+        
+        var canvasBoundaries = canvas.getBoundingClientRect();
+        
+        var toplabel = document.createElement("span");
+        toplabel.id = 'topLabel_'+cursorDiv.id;
+        toplabel.className = 'tooltiptexttop';
+        relativeStart = Math.round(mouse.x - canvasBoundaries.left)
+
+        getSelectionDate(toplabel.id, relativeStart,timeLevel+1, getSelectionHierarchy(canvas));
+        
+        cursorDiv.appendChild(toplabel); 
+        
+        document.getElementById('cursors').appendChild(cursorDiv)
+    }
+        
+    
+    if (element !== null) {
+    
+        element.style.width = Math.abs(mouse.x - mouse.startX) + 'px';
+        //element.style.height = Math.abs(mouse.y - mouse.startY) + 'px';
+        //console.log('mouse.x: '+mouse.x)
+        //console.log('mouse.startX: '+mouse.startX)
+        element.style.left = (mouse.x - mouse.startX < 0) ? mouse.x + 'px' : mouse.startX + 'px';
+        //element.style.top = (mouse.y - mouse.startY < 0) ? mouse.y + 'px' : mouse.startY + 'px';
+    }
+}
+
+
+
+function getSelectionHierarchy(canavsObj){
+	parentcanvasId = canavsObj.getAttribute('parentcanvas');
+	startXHeirarchy = null;
+	var stack = [];
+	canvasId = canavsObj.id;
+	if(parentcanvasId!==rootChar){
+		while(parentcanvasId!==rootChar){
+			parentcanvas = document.getElementById(parentcanvasId);
+			selectorId = canvasId.replace('canvas','selectRect_');
+	        var selectorObj = document.getElementById(selectorId);	
+	        
+	        parentSStart =  Math.round(selectorObj.getBoundingClientRect().left - parentcanvas.getBoundingClientRect().left);
+	        stack.push(parentSStart);
+	        
+	        canvasId = parentcanvasId
+	        parentcanvasId = parentcanvas.getAttribute('parentcanvas');
+		}
+		
+	}
+	//console.log("stack.length: "+stack.length);
+	//console.log("stack.length: "+stack);
+	if(stack.length>0){
+		startXHeirarchy = [0,0,0];
+		i=timeLevels-1;
+		while(stack.length>0){
+			startXHeirarchy[i]=stack.pop();
+			i--;
+		}
+	}
+	
+	return startXHeirarchy;
+}
+
+function displayGuideLines(timeLevel){
+	
+	var canvas =  document.getElementById('guidelines'+timeLevel);
+	var ctx = canvas.getContext('2d');
+	ctx.clearRect(0, 0, canvas.width, canvas.height);	
+	canvas.style.position ='absolute';
+	canvas.style.top = getNextLevelTopPos(timeLevel) - 5 +"px";
+	
+	var leftPos = document.getElementById('container'+(timeLevel+1)+'_cavases').children[0].getBoundingClientRect().left;
+	canvas.style.left = leftPos+"px";
+	
+	var pixelOffset = leftPos;//+2;
+	
+	var selectors = document.getElementById('selector'+timeLevel).children;
+	for(var i = 0; i < selectors.length; i++) {
+		var selectorId = selectors[i].id;
+		var selectionId = selectorId.split("_")[2];
+		//var containerId = selectorId.replace('canvas', 'container');
+		var containerId = selectorId.replace('selectRect_', 'canvas');
+		var container = document.getElementById(containerId);
+		
+		sLeft = selectors[i].getBoundingClientRect().left;
+		sRight = selectors[i].getBoundingClientRect().right;
+		
+		cLeft = container.getBoundingClientRect().left;
+		cRight = container.getBoundingClientRect().right;
+		
+		
+		ctx.beginPath();
+		ctx.moveTo(sLeft-pixelOffset,0);
+		ctx.lineTo(cLeft-pixelOffset,canvas.height);
+		ctx.lineTo(cRight-pixelOffset,canvas.height);
+		ctx.lineTo(sRight-pixelOffset,0);
+		ctx.closePath();
+		ctx.globalAlpha = 0.6;
+		ctx.fillStyle = selectionColors[selectionId-1];
+		ctx.fill();
+		
+		
+	}
+	
+}
+
+
+function getCanvasElement(timeLevel,parentCanavs,selectionid){
+	
+	var canvasContainer =  document.getElementById('container'+timeLevel).children[0];	// conatiner[t]_canvases
+	var compareContainer =  document.getElementById('container'+timeLevel).children[1];	// conatiner[t]_compare
+	var containerElements =  canvasContainer.children;
+	
+	var parentDivId = rootChar ;
+	var parentCanvasId = rootChar ;
+	if(parentCanavs !== null){
+		parentDivId = parentCanavs.parentElement.id;
+		parentCanvasId = parentCanavs.id;
+	}
+	var targetId = 'container'+timeLevel+'_'+selectionid+'_'+parentDivId;
+	var foundCanvas = null;
+	var canvases = [];
+	//console.log('parentId: '+parentId);
+	//console.log('targetId: '+targetId);
+	for(var i = 0; i < containerElements.length; i++) {
+	    if(containerElements[i].tagName == 'DIV' && containerElements[i].id.indexOf(parentDivId) !== -1) {
+	    	//console.log("found canvas:"+containerElements[i].children[0]); // chage it to index 1 when add scale canvas later
+	    	canvases.push(containerElements[i].children[0]);	// push canvas to the array
+	    	//console.log('containerElements[i].id: '+containerElements[i].id);
+	    	if(containerElements[i].id === targetId) {
+	    		foundCanvas = containerElements[i].children[0];
+	    		break;
+	        }
+	    }
+	}
+	
+ 	if(foundCanvas!==null){	// found
+ 		return foundCanvas;
+ 	}else{	// not found
+ 		var canvasesCount = canvases.length;
+ 		//console.log('canvasesCount: '+canvasesCount);
+ 		var newCanvasCount = canvasesCount+1;
+ 		var widthOfEachCanvas = 0;
+ 		var widthOfDivContainer = 0;
+ 		var leftPos = 0;
+ 		var topPos = 0;
+ 		var marginSpace = 15;
+ 		if(parentCanavs === null){
+ 			widthOfEachCanvas = rootCanvasWidth; // default size of root canvas
+ 			widthOfDivContainer = 1500;	// default size of root div
+ 			topPos = 80;
+ 			leftPos = document.getElementById('timeAxis').getBoundingClientRect().left;
+ 		}else{
+ 			var parentWidth = parentCanavs.parentElement.getBoundingClientRect().width;
+ 			widthOfDivContainer = Math.floor((parentWidth-(marginSpace*(newCanvasCount-1)))/newCanvasCount);	// new canvas width
+ 			widthOfEachCanvas = widthOfDivContainer - 10;													// new div width
+ 			leftPos = parentCanavs.parentElement.getBoundingClientRect().left + (canvasesCount*widthOfDivContainer) + ((newCanvasCount-1)*marginSpace) ;
+ 			
+ 			topPos = getNextLevelTopPos(timeLevel) + 50;
+ 			
+ 			if(canvasesCount==0){
+ 				marginSpace = 0;
+ 			}
+ 		}
+ 		
+ 		
+ 		// adjust size & position of already exist containers
+ 		var offset = 0;
+ 		for(var i = 0; i < canvases.length; i++) {
+ 			
+ 			if(i==0){
+ 				offset = parentCanavs.parentElement.getBoundingClientRect().left;
+ 				canvases[i].parentElement.style.marginLeft = '0px';
+ 			}else{
+ 				offset += widthOfDivContainer+marginSpace;
+ 			}
+ 			canvases[i].parentElement.style.width = widthOfDivContainer+"px";
+ 			canvases[i].parentElement.style.left = offset+'px';
+ 			redrawCanvasWithNewWidth(canvases[i], widthOfEachCanvas);
+ 			
+ 			if(i<canvases.length-1){
+ 				updateComparisonPanel(canvases[i].id, canvases[i+1].id, widthOfDivContainer, widthOfEachCanvas, marginSpace);
+ 				
+ 				
+ 				
+ 			}
+ 		    
+ 			
+ 		}
+ 		
+ 		// create new Div
+ 		var element = document.createElement('div');
+    	element.id = 'container'+timeLevel+'_'+selectionid+'_'+parentDivId;
+    	element.style.cssFloat = 'left';
+    	element.style.width = widthOfDivContainer+'px';
+    	//element.style.border = 'solid black';
+    	//element.style.marginLeft = marginSpace+'px';
+    	element.style.position = 'absolute';
+    	element.style.left = leftPos+'px';
+    	element.style.top = topPos+'px';
+    	element.setAttribute('selectionid', selectionid);
+    	element.setAttribute('parentdiv', parentDivId);
+    	
+    	// create new canvas
+    	var canvas = document.createElement("canvas");
+		canvas.id = 'canvas'+timeLevel+'_'+selectionid+'_'+parentCanvasId;
+		canvas.setAttribute('parentcanvas', parentCanvasId);
+		canvas.setAttribute('selectionid', selectionid);
+   		canvas.width = widthOfEachCanvas;
+   		canvas.height = defaultCanvasHeight;	// default height
+   		//var canvasScale = document.createElement("canvas");
+   		element.appendChild(canvas);
+   		canvasContainer.appendChild(element);
+   		
+   		if(canvases.length>0){	// at least there are two canvases
+   			// add comparison panel
+   	   		
+   			var pevCanvas = canvases[canvases.length-1];
+   			
+   			//create compare button for first time only
+   			var compareBtn = document.createElement("a");
+   			compareBtn.id = 'compareBtn_'+pevCanvas.id + '|' + canvas.id;
+   			compareBtn.className = 'compareLink';
+   			compareBtn.href =  "javascript:toggleComparePanel('"+compareContainer.id+"',"+timeLevel+",'"+pevCanvas.id+"','"+canvas.id+"');";  
+   			compareBtn.innerHTML = "";
+   			compareBtn.style.position = 'absolute';
+   			compareBtn.style.left = leftPos-marginSpace+'px';	// center button exactly between two canvas
+   			compareBtn.style.top = topPos + (element.getBoundingClientRect().height/2) + 'px';
+   	   		
+   	   		compareContainer.appendChild(createComparisonCanvas(pevCanvas.id,canvas.id,widthOfDivContainer,widthOfEachCanvas,marginSpace));	
+   	   		canvasContainer.appendChild(compareBtn);	
+   		}
+   		
+   		
+    	return canvas;
+ 	}
+	
+}
+
+function createComparisonCanvas(canID1,canID2,widthOfDivContainer,widthOfEachCanvas, marginSpace){
+	// variables
+	
+	var can1 = document.getElementById(canID1);
+	var can2 = document.getElementById(canID2);
+	
+	var divID1 = can1.parentElement.id;
+	var divID2 = can2.parentElement.id;
+	
+   	var offset = can1.parentElement.getBoundingClientRect().left;
+   	var leftPos = offset + ((widthOfDivContainer*2+marginSpace)/2) - (widthOfDivContainer/2);
+   	var topPos = can1.parentElement.getBoundingClientRect().bottom + window.scrollY;
+	// create the div 
+	var compareDiv = document.createElement('div');
+	compareDiv.id = 'comparecontainer_'+divID1 + '|' + divID2;
+	compareDiv.style.width = widthOfDivContainer+'px';
+	compareDiv.style.position = 'absolute';
+	compareDiv.style.left = leftPos+'px';
+	compareDiv.style.top = topPos+'px';
+	compareDiv.style.display = 'none';
+	
+	// create the canvas
+	var compareCanvas = document.createElement("canvas");
+	compareCanvas.id = 'comparecanvas_'+canID1 + '|' + canID2;
+	//compareCanvas.setAttribute('canvas1', canID1);
+	//compareCanvas.setAttribute('canvas2', canID2);
+	compareCanvas.width = widthOfEachCanvas;
+	compareCanvas.height = can1.height;	
+	compareCanvas.style.paddingTop = '10px';
+	
+	compareDiv.appendChild(compareCanvas);
+	
+	
+	
+	
+	
+	
+	return compareDiv;
+	
+}
+
+function updateComparisonPanel(canID1, canID2, widthOfDivContainer,widthOfEachCanvas, marginSpace){
+	var comparecanvas = document.getElementById('comparecanvas_'+canID1+'|'+canID2);
+	var can1 = document.getElementById(canID1);
+	var can2 = document.getElementById(canID2);
+	
+	var offset = can1.parentElement.getBoundingClientRect().left;
+	divLeftPos = offset + ((widthOfDivContainer*2+marginSpace)/2) - (widthOfDivContainer/2);
+	comparecanvas.parentElement.style.width = widthOfDivContainer+"px";
+	comparecanvas.parentElement.style.left = divLeftPos+'px';
+	redrawCanvasWithNewWidth(comparecanvas, widthOfEachCanvas);
+	
+	// adjust position of compare buttons
+	var compareBtn = document.getElementById('compareBtn_'+canID1+'|'+canID2);
+	compareBtn.style.left = offset + ((widthOfDivContainer*2)/2)  +'px';
+}
+
+//redraw after resizing canvas
+function redrawCanvasWithNewWidth(canvasEle, newWidth){
+	var ctx = canvasEle.getContext('2d');
+	var imgData=ctx.getImageData(0,0, canvasEle.width,canvasEle.height);
+	ctx.clearRect(0, 0, canvasEle.width, canvasEle.height);	
+	canvasEle.width = newWidth;
+	ctx.putImageData(imgData,0,0,0,0,canvasEle.width, canvasEle.height);
+}
+
+function compareImages(canID1, canID2){
+	var comparecanvas = document.getElementById('comparecanvas_'+canID1+'|'+canID2);
+	var can1 = document.getElementById(canID1);
+	var can2 = document.getElementById(canID2);
+	
+	var compare_ctx = comparecanvas.getContext('2d');
+	var can1_ctx = can1.getContext('2d');
+	var can2_ctx = can2.getContext('2d'); 
+	
+	compare_ctx.drawImage(img, 0, 0);	//reset
+  	
+	var diffImageData = compare_ctx.getImageData(0, 0, comparecanvas.width, comparecanvas.height);
+	var image1Data = can1_ctx.getImageData(0, 0, can1.width, can1.height);
+	var image2Data = can2_ctx.getImageData(0, 0, can2.width, can2.height);
+	
+	var diffData = diffImageData.data;
+	var data1 = image1Data.data;	
+  	var data2 = image2Data.data;
+  	
+  	// data1 and data2 should be the same size
+  	var diff=0;
+  	for (var i = 0; i < data1.length; i += 4) {
+  		diffData[i] = Math.abs(data1[i] - data2[i]);  // red
+  		diffData[i+1]= Math.abs(data1[i+1] - data2[i+1]);	//green
+  		diffData[i+2]= Math.abs(data1[i+2] - data2[i+2]);	// blue
+        /*
+  		diff /= 3;
+        
+        diff = 255 - diff;	// invert
+        diffData[i]=diff;
+        diffData[i+1]=diff;
+        diffData[i+2]=diff;
+        */
+        
+   	}
+  	compare_ctx.putImageData(diffImageData, 0, 0);
+	
+}
+
+function createSelectionRect(selection){
+	currentSelection = selection;
+}
+
+
+function toggleComparePanel(divID, timeLevel, canID1,canID2) {
+	var containerDiv = document.getElementById(divID);
+    var containerElements = containerDiv.children;
+    var disp = 0;
+    
+    var can1 = document.getElementById(canID1);
+	var can2 = document.getElementById(canID2);
+	
+	// check visibilty before 
+	var allNoneBefore = 1;
+	for(var i = 0; i < containerElements.length; i++) {
+		var x = containerElements[i];
+	    if(x.tagName == 'DIV' && x.style.display === 'block') {
+	    	allNoneBefore = 0;
+	    	break;
+	    }
+	}
+	
+    var comparecontainer = document.getElementById('comparecontainer_'+can1.parentElement.id+'|'+can2.parentElement.id);
+    if(comparecontainer.style.display === 'none'){
+    	compareImages(canID1,canID2);
+    	comparecontainer.style.display = 'block';
+    	disp = comparecontainer.getBoundingClientRect().height;	// movedown
+		
+    }else{
+    	disp = -comparecontainer.getBoundingClientRect().height;	// moveup	
+    	comparecontainer.style.display = 'none';
+    }
+
+ 	// check visibilty after 
+	var allNoneAfter = 1;
+	for(var i = 0; i < containerElements.length; i++) {
+		var x = containerElements[i];
+	    if(x.tagName == 'DIV' && x.style.display === 'block') {
+	    	allNoneAfter = 0;
+	    	break;
+	    }
+	}
+    
+    if(allNoneBefore === 1){	// move down
+    	for(var t=timeLevel-1;t>=0;t--){
+    		adjustYCoordinatesofLevel(t, disp);	// adjust position for all subsequent levels	
+    	}
+    }else if(allNoneAfter === 1){	//move up
+    	for(var t=timeLevel-1;t>=0;t--){
+    		adjustYCoordinatesofLevel(t, disp);	// adjust position for all subsequent levels	
+    	}
+    }
+	
+    
+    
+}
+
+// this function depends on the visibility of the sub elements
+function getComparePanelHeight(comparePanel){
+	var containerElements = comparePanel.children;
+	for(var i = 0; i < containerElements.length; i++) {
+		var x = containerElements[i];
+	    if(x.tagName == 'DIV' && x.style.display === 'block') {
+	    	return x.getBoundingClientRect().bottom  + window.scrollY;
+	    }
+	}
+}
+
+function getNextLevelTopPos(timeLevel){
+	var topPos = 0;
+	var firstCanvasofUpperLevel = document.getElementById('container'+(timeLevel+1)+'_cavases').children[0];
+	var compareContainerHeight = getComparePanelHeight(document.getElementById('container'+(timeLevel+1)+'_compare'));
+	if(typeof compareContainerHeight != 'undefined' && compareContainerHeight>0){
+		topPos = compareContainerHeight;
+	}else{
+		topPos = firstCanvasofUpperLevel.getBoundingClientRect().bottom + window.scrollY;	
+	}
+	
+	return topPos;
+}
+
+function adjustYCoordinatesofLevel(timeLevel, disp){
+
+	var oldTop = 0;
+	var canvasContainer = document.getElementById('container'+(timeLevel)+'_cavases');
+	if(canvasContainer != null){	// check if level panel exist
+		var canvasContainerElements = canvasContainer.children;
+		var compareContainerElements = document.getElementById('container'+(timeLevel)+'_compare').children;
+		var guidlineCanvas = document.getElementById('guidelines'+timeLevel);
+		
+		//adjust guidlineCanvas
+		if(typeof guidlineCanvas != 'undefined'){
+			oldTop = guidlineCanvas.getBoundingClientRect().top + window.scrollY;
+			guidlineCanvas.style.top = oldTop+disp+'px';
+		}
+		
+		// adjust canvas panel
+		if(typeof canvasContainerElements != 'undefined'){
+			for(var i = 0; i < canvasContainerElements.length; i++) {
+				oldTop = canvasContainerElements[i].getBoundingClientRect().top + window.scrollY; 
+				canvasContainerElements[i].style.top = oldTop+disp+'px';
+			}
+		}
+		
+		//adjust comparison panel
+		var displayOption = '';
+		if(typeof compareContainerElements != 'undefined'){
+			for(var i = 0; i < compareContainerElements.length; i++) {
+				displayOption = compareContainerElements[i].style.display;
+				compareContainerElements[i].style.display = 'block';
+				oldTop = compareContainerElements[i].getBoundingClientRect().top + window.scrollY;
+				compareContainerElements[i].style.top = oldTop+disp+'px';
+				compareContainerElements[i].style.display = displayOption;	// reset the original option
+				
+			}
+		}
+	}
+}
+
+
+
+function showRangeValue(timeLevel, newValue)
+{
+	document.getElementById("range"+timeLevel).innerHTML=newValue;
+	currentSelection = 0;
+	getImageSegment(0,1500,timeLevel,null,null,newValue);
+}
+
+
+
+
+</script>
+</body>
+</html>
