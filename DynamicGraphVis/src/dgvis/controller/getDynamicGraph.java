@@ -69,7 +69,7 @@ public class getDynamicGraph extends HttpServlet {
 		
 		String path = getServletContext().getRealPath("/");
 		//File file = new File (path+"resources/943076781_T_ONTIME_JulyToDec2001.csv");
-		File file = new File (path+"resources/2000-2001/2000-2001.csv");	// take care, time cell order is different here
+		File file = new File (path+"resources/2000-2001/two.csv");	// take care, time cell order is different here
 		
 		/*
 		File file =  new File(path+"resources/2000-2001/2000-2001.csv");

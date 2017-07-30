@@ -64,7 +64,7 @@ public class DynamicGraph implements Serializable{
 	 */
 	private static final long serialVersionUID = 1L;
 	public static final String START_DATE= "2000-01-01 00:00";
-	public static final String END_DATE= "2002-01-01 00:00";
+	public static final String END_DATE= "2000-03-01 00:00";
 	public static final int PIXEL_OFFSET = 0;
 	public static final int PIXEL_VERTEX_GAP = 2;
 	public static final int[] PIXEL_TIME_GAP = new int[]{1,2,2};
